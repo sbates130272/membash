@@ -33,8 +33,39 @@
 #include "src/suffix.h"
 #include "src/report.h"
 
+struct membash {
+	void          *mem;
+	size_t         size;
+	unsigned      verbose;
+	
+};
+
+static const struct membash defaults = {
+	.mem        = NULL,
+	.size       = 1024,
+	.verbose    = 0,
+};
+
+
+const char program_desc[] =
+	"Simple memory tester program";
+
+static const struct argconfig_commandline_options command_line_options[] = {
+	{"s",             "NUM", CFG_LONG_SUFFIX, &defaults.size, required_argument, NULL},
+	{"size",          "NUM", CFG_LONG_SUFFIX, &defaults.size, required_argument,
+	 "block size to use"},
+	{"v",             "", CFG_NONE, &defaults.verbose, no_argument, NULL},
+	{"verbose",       "", CFG_NONE, &defaults.verbose, no_argument,
+	 "be verbose"},
+	{0}
+};
+
 int main(int argc, char **argv)
 {
-	printf("Hello World!\n");
-	return 0;
+	struct membash cfg;
+	
+	int args = argconfig_parse(argc, argv, program_desc, command_line_options,
+				   &defaults, &cfg, sizeof(cfg));
+		
+	return args;
 }
