@@ -42,9 +42,11 @@
 struct membash {
 	unsigned      *mem;
 	size_t        size;
+	size_t        iters;
 	unsigned      seed;
 	unsigned      verbose;
 
+	size_t                  (* hash)(size_t);      
 	struct timeval          start_time;
 	struct timeval          end_time;	
 };
@@ -52,8 +54,10 @@ struct membash {
 static const struct membash defaults = {
 	.mem        = NULL,
 	.size       = 1024,
+	.iters      = 1,
 	.seed       = 0,
 	.verbose    = 0,
+	.hash       = NULL,
 };
 
 const char program_desc[] =
@@ -63,6 +67,9 @@ static const struct argconfig_commandline_options command_line_options[] = {
 	{"s",             "NUM", CFG_LONG_SUFFIX, &defaults.size, required_argument, NULL},
 	{"size",          "NUM", CFG_LONG_SUFFIX, &defaults.size, required_argument,
 	 "block size to use"},
+	{"i",             "NUM", CFG_LONG_SUFFIX, &defaults.iters, required_argument, NULL},
+	{"iters",         "NUM", CFG_LONG_SUFFIX, &defaults.iters, required_argument,
+	 "number of iterations to loop over"},
 	{"seed",          "NUM", CFG_LONG_SUFFIX, &defaults.seed, required_argument,
 	 "random seed to use for data (set to 0 for auto-gen seed)"},
 	{"v",             "", CFG_NONE, &defaults.verbose, no_argument, NULL},
@@ -83,7 +90,7 @@ static int setup(struct membash *m)
 		
 	
 	gettimeofday(&m->start_time, NULL);
-	for (unsigned i=0; i<m->size-1; i++) {
+	for (size_t i=0; i<m->size-1; i++) {
 		m->mem[i] = (char)rand();
 		sum += m->mem[i];
 	}
@@ -100,25 +107,37 @@ static int setup(struct membash *m)
 
 static int run(struct membash *m)
 {
-	unsigned sum = 0;
 
 	gettimeofday(&m->start_time, NULL);
-	for (unsigned i=0; i<m->size; i++)
-		sum += m->mem[i];
+	for (size_t iters=0; iters < m->iters; iters++)
+	{
+		unsigned sum = 0;
+		for (size_t i=0; i<m->size; i++){
+			if ( m->hash )
+				sum += m->mem[m->hash(i)];
+			else
+				sum += m->mem[i];
+		}
 
-	if ( sum ){
-		fprintf(stderr,"sum did not add to zero (%u)!\n",
-			sum);
-		exit(1);
+		if ( sum ){
+			fprintf(stderr,"sum did not add to zero (%u)!\n",
+				sum);
+			exit(1);
+		}
 	}
-		
 	gettimeofday(&m->end_time, NULL);
 	fprintf(stdout, "Read : ");
 	report_transfer_rate(stdout, &m->start_time,
-			     &m->end_time, m->size*sizeof(unsigned));
+			     &m->end_time,
+			     m->iters*m->size*sizeof(unsigned));
 	fprintf(stdout, "\n");
 
 	return 0;
+}
+
+static inline size_t hash_stupid(size_t i)
+{
+	return i;
 }
 
 int main(int argc, char **argv)
@@ -137,6 +156,8 @@ int main(int argc, char **argv)
 	srand(cfg.seed);
 
 	setup(&cfg);
+	run(&cfg);
+	cfg.hash = hash_stupid;
 	run(&cfg);
 	
 	return 0;
