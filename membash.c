@@ -25,7 +25,7 @@
 //   Date:   Dec 16 2015
 //
 //   Description:
-//     Program for testing memory access 
+//     Program for testing memory access
 //
 ////////////////////////////////////////////////////////////////////////
 
@@ -46,9 +46,9 @@ struct membash {
 	unsigned      seed;
 	unsigned      verbose;
 
-	size_t                  (* hash)(size_t);      
+	size_t                  (* hash)(size_t);
 	struct timeval          start_time;
-	struct timeval          end_time;	
+	struct timeval          end_time;
 };
 
 static const struct membash defaults = {
@@ -87,8 +87,8 @@ static int setup(struct membash *m)
 		fprintf(stderr,"could not allocate for mem!\n");
 		exit(1);
 	}
-		
-	
+
+
 	gettimeofday(&m->start_time, NULL);
 	for (size_t i=0; i<m->size-1; i++) {
 		m->mem[i] = (char)rand();
@@ -143,7 +143,7 @@ static inline size_t hash_stupid(size_t i)
 int main(int argc, char **argv)
 {
 	struct membash cfg;
-	
+
 	int args = argconfig_parse(argc, argv, program_desc, command_line_options,
 				   &defaults, &cfg, sizeof(cfg));
 	if (args != 0) {
@@ -159,6 +159,6 @@ int main(int argc, char **argv)
 	run(&cfg);
 	cfg.hash = hash_stupid;
 	run(&cfg);
-	
+
 	return 0;
 }
