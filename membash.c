@@ -34,6 +34,7 @@
 #include <unistd.h>
 #include <limits.h>
 #include <time.h>
+#include <errno.h>
 #include <fcntl.h>
 
 #include <sys/time.h>
@@ -105,8 +106,16 @@ static int setup(struct membash *m)
     if ( m->mmap ){
 
         m->mmapfd = open(m->mmap, O_RDWR);
+	if ( m->mmapfd<0 ){
+	  fprintf(stderr,"%s\n",strerror(errno));
+	  exit(errno);
+	}
         m->mem = mmap(NULL, m->size, PROT_WRITE | PROT_READ,
                       MAP_SHARED, m->mmapfd, 0);
+	if ( m->mem==MAP_FAILED ){
+	  fprintf(stderr,"%s\n",strerror(errno));
+	  exit(errno);
+	}
     }
     else
         m->mem = malloc(m->size);
@@ -251,9 +260,11 @@ int main(int argc, char **argv)
 	srand(cfg.seed);
 
 	setup(&cfg);
+
+#ifndef __powerpc64__
     if ( cfg.fence )
         asm volatile("mfence" ::: "memory");
-
+#endif
 	cfg.run  = run_dumb;
     cfg.run(&cfg);
 	cfg.hash = hash_stupid;
