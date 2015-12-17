@@ -30,10 +30,14 @@
 ////////////////////////////////////////////////////////////////////////
 
 #include <stdlib.h>
+#include <stdio.h>
+#include <unistd.h>
 #include <limits.h>
 #include <time.h>
+#include <fcntl.h>
 
 #include <sys/time.h>
+#include <sys/mman.h>
 
 #include "src/argconfig.h"
 #include "src/suffix.h"
@@ -47,6 +51,9 @@ struct membash {
     unsigned      fence;
 	unsigned      verbose;
 
+    char          *mmap;
+    int           mmapfd;
+
 	size_t                  (* hash)(size_t);
     int                     (* run)(struct membash *);
 
@@ -59,6 +66,7 @@ static const struct membash defaults = {
 	.size       = 1024,
 	.iters      = 1,
 	.seed       = 0,
+    .mmap       = NULL,
 	.verbose    = 0,
 	.hash       = NULL,
 };
@@ -75,6 +83,8 @@ static const struct argconfig_commandline_options command_line_options[] = {
 	 "number of iterations to loop over"},
 	{"seed",          "NUM", CFG_LONG_SUFFIX, &defaults.seed, required_argument,
 	 "random seed to use for data (set to 0 for auto-gen seed)"},
+    {"mmap",          "MMAP", CFG_STRING, &defaults.mmap, required_argument,
+            "file to mmap"},
 	{"fence",         "", CFG_NONE, &defaults.fence, no_argument,
 	 "add a mfence between setup and run"},
 	{"v",             "", CFG_NONE, &defaults.verbose, no_argument, NULL},
@@ -87,7 +97,15 @@ static int setup(struct membash *m)
 {
 	unsigned sum = 0;
 
-	m->mem = malloc(m->size*sizeof(unsigned));
+    if ( m->mmap ){
+
+        m->mmapfd = open(m->mmap, O_RDWR);
+        m->mem = mmap(NULL, m->size, PROT_WRITE | PROT_READ,
+                      MAP_SHARED, m->mmapfd, 0);
+    }
+    else
+        m->mem = malloc(m->size*sizeof(unsigned));
+
 	if (m->mem == NULL){
 		fprintf(stderr,"could not allocate for mem!\n");
 		exit(1);
@@ -168,7 +186,12 @@ static int run_dumb(struct membash *m)
 
 static void cleanup(struct membash *m)
 {
-    free(m->mem);
+    if ( m->mmap ){
+        munmap(m->mem, m->size);
+        close(m->mmapfd);
+    }
+    else
+        free(m->mem);
 }
 
 static inline size_t hash_stupid(size_t i)
