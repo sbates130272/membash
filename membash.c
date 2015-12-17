@@ -43,6 +43,8 @@
 #include "src/suffix.h"
 #include "src/report.h"
 
+typedef unsigned membash_t;
+
 struct membash {
 	unsigned      *mem;
 	size_t        size;
@@ -95,7 +97,7 @@ static const struct argconfig_commandline_options command_line_options[] = {
 
 static int setup(struct membash *m)
 {
-	unsigned sum = 0;
+	membash_t sum = 0;
 
     if ( m->mmap ){
 
@@ -104,7 +106,7 @@ static int setup(struct membash *m)
                       MAP_SHARED, m->mmapfd, 0);
     }
     else
-        m->mem = malloc(m->size*sizeof(unsigned));
+        m->mem = malloc(m->size*sizeof(membash_t));
 
 	if (m->mem == NULL){
 		fprintf(stderr,"could not allocate for mem!\n");
@@ -121,7 +123,7 @@ static int setup(struct membash *m)
 	gettimeofday(&m->end_time, NULL);
 	fprintf(stdout, "Wrote         : ");
 	report_transfer_rate(stdout, &m->start_time,
-			     &m->end_time, m->size*sizeof(unsigned));
+			     &m->end_time, m->size*sizeof(membash_t));
 	fprintf(stdout, "\n");
 
 	return 0;
@@ -129,9 +131,9 @@ static int setup(struct membash *m)
 
 static int run_memcpy(struct membash *m)
 {
-    unsigned *dest;
+    membash_t *dest;
 
-    dest = malloc(m->size*sizeof(unsigned));
+    dest = malloc(m->size*sizeof(membash_t));
 	if (dest == NULL){
 		fprintf(stderr,"could not allocate for dest!\n");
 		exit(1);
@@ -140,13 +142,13 @@ static int run_memcpy(struct membash *m)
     gettimeofday(&m->start_time, NULL);
 	for (size_t iters=0; iters < m->iters; iters++)
 	{
-        memcpy(dest,m->mem,m->size*sizeof(unsigned));
+        memcpy(dest,m->mem,m->size*sizeof(membash_t));
 	}
 	gettimeofday(&m->end_time, NULL);
 	fprintf(stdout, "Read (memcpy) : ");
 	report_transfer_rate(stdout, &m->start_time,
 			     &m->end_time,
-			     m->iters*m->size*sizeof(unsigned));
+			     m->iters*m->size*sizeof(membash_t));
 	fprintf(stdout, "\n");
 
     free(dest);
@@ -155,7 +157,7 @@ static int run_memcpy(struct membash *m)
 
 static int run_dumb(struct membash *m)
 {
-    unsigned sum = 0;
+    membash_t sum = 0;
 
 	gettimeofday(&m->start_time, NULL);
 	for (size_t iters=0; iters < m->iters; iters++)
@@ -178,7 +180,7 @@ static int run_dumb(struct membash *m)
 	fprintf(stdout, "Read (dumb)   : ");
 	report_transfer_rate(stdout, &m->start_time,
 			     &m->end_time,
-			     m->iters*m->size*sizeof(unsigned));
+			     m->iters*m->size*sizeof(membash_t));
 	fprintf(stdout, "\n");
 
 	return 0;
