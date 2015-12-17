@@ -43,13 +43,12 @@
 #include "src/suffix.h"
 #include "src/report.h"
 
-typedef unsigned membash_t;
-
 struct membash {
-	unsigned      *mem;
+	void          *mem;
 	size_t        size;
 	size_t        iters;
 	unsigned      seed;
+    unsigned      blockcpy;
     unsigned      fence;
 	unsigned      verbose;
 
@@ -67,6 +66,7 @@ static const struct membash defaults = {
 	.mem        = NULL,
 	.size       = 1024,
 	.iters      = 1,
+    .blockcpy   = 0,
 	.seed       = 0,
     .mmap       = NULL,
 	.verbose    = 0,
@@ -79,9 +79,12 @@ const char program_desc[] =
 static const struct argconfig_commandline_options command_line_options[] = {
 	{"s",             "NUM", CFG_LONG_SUFFIX, &defaults.size, required_argument, NULL},
 	{"size",          "NUM", CFG_LONG_SUFFIX, &defaults.size, required_argument,
-	 "block size to use"},
+	 "block size to use (in bytes)"},
 	{"i",             "NUM", CFG_LONG_SUFFIX, &defaults.iters, required_argument, NULL},
 	{"iters",         "NUM", CFG_LONG_SUFFIX, &defaults.iters, required_argument,
+	 "number of iterations to loop over"},
+	{"b",             "NUM", CFG_LONG_SUFFIX, &defaults.blockcpy, required_argument, NULL},
+	{"blockcpy",      "NUM", CFG_LONG_SUFFIX, &defaults.blockcpy, required_argument,
 	 "number of iterations to loop over"},
 	{"seed",          "NUM", CFG_LONG_SUFFIX, &defaults.seed, required_argument,
 	 "random seed to use for data (set to 0 for auto-gen seed)"},
@@ -97,7 +100,7 @@ static const struct argconfig_commandline_options command_line_options[] = {
 
 static int setup(struct membash *m)
 {
-	membash_t sum = 0;
+	unsigned sum = 0, *ptr;
 
     if ( m->mmap ){
 
@@ -106,24 +109,25 @@ static int setup(struct membash *m)
                       MAP_SHARED, m->mmapfd, 0);
     }
     else
-        m->mem = malloc(m->size*sizeof(membash_t));
+        m->mem = malloc(m->size);
 
 	if (m->mem == NULL){
 		fprintf(stderr,"could not allocate for mem!\n");
 		exit(1);
 	}
+    ptr = m->mem;
 
 	gettimeofday(&m->start_time, NULL);
-	for (size_t i=0; i<m->size-1; i++) {
-		m->mem[i] = (char)rand();
-		sum += m->mem[i];
+	for (size_t i=0; i<(m->size/sizeof(unsigned))-1; i++) {
+		ptr[i] = (unsigned)rand();
+		sum += ptr[i];
 	}
-	m->mem[m->size-1] = UINT_MAX - sum + 1;
+	ptr[m->size/sizeof(unsigned)-1] = UINT_MAX - sum + 1;
 
 	gettimeofday(&m->end_time, NULL);
-	fprintf(stdout, "Wrote         : ");
+	fprintf(stdout, "Wrote           : ");
 	report_transfer_rate(stdout, &m->start_time,
-			     &m->end_time, m->size*sizeof(membash_t));
+                         &m->end_time, m->size);
 	fprintf(stdout, "\n");
 
 	return 0;
@@ -131,9 +135,9 @@ static int setup(struct membash *m)
 
 static int run_memcpy(struct membash *m)
 {
-    membash_t *dest;
+    void *dest;
 
-    dest = malloc(m->size*sizeof(membash_t));
+    dest = malloc(m->size);
 	if (dest == NULL){
 		fprintf(stderr,"could not allocate for dest!\n");
 		exit(1);
@@ -142,13 +146,13 @@ static int run_memcpy(struct membash *m)
     gettimeofday(&m->start_time, NULL);
 	for (size_t iters=0; iters < m->iters; iters++)
 	{
-        memcpy(dest,m->mem,m->size*sizeof(membash_t));
+        memcpy(dest, m->mem, m->size);
 	}
 	gettimeofday(&m->end_time, NULL);
-	fprintf(stdout, "Read (memcpy) : ");
+	fprintf(stdout, "Read (memcpy)   : ");
 	report_transfer_rate(stdout, &m->start_time,
 			     &m->end_time,
-			     m->iters*m->size*sizeof(membash_t));
+			     m->iters*m->size);
 	fprintf(stdout, "\n");
 
     free(dest);
@@ -157,17 +161,19 @@ static int run_memcpy(struct membash *m)
 
 static int run_dumb(struct membash *m)
 {
-    membash_t sum = 0;
+    unsigned sum = 0, *ptr;
+
+    ptr = m->mem;
 
 	gettimeofday(&m->start_time, NULL);
 	for (size_t iters=0; iters < m->iters; iters++)
 	{
 		sum = 0;
-		for (size_t i=0; i<m->size; i++){
+		for (size_t i=0; i<(m->size/sizeof(unsigned)); i++){
 			if ( m->hash )
-				sum += m->mem[m->hash(i)];
+				sum += ptr[m->hash(i)];
 			else
-				sum += m->mem[i];
+				sum += ptr[i];
 		}
 
 		if ( sum ){
@@ -177,12 +183,35 @@ static int run_dumb(struct membash *m)
             }
 	}
 	gettimeofday(&m->end_time, NULL);
-	fprintf(stdout, "Read (dumb)   : ");
+	fprintf(stdout, "Read (dumb)     : ");
 	report_transfer_rate(stdout, &m->start_time,
 			     &m->end_time,
-			     m->iters*m->size*sizeof(membash_t));
+			     m->iters*m->size);
 	fprintf(stdout, "\n");
 
+	return 0;
+}
+
+static int run_blockcpy(struct membash *m)
+{
+    typedef struct { char a[m->blockcpy]; } membash_t;
+    membash_t dst, *ptr;
+
+	gettimeofday(&m->start_time, NULL);
+	for (size_t iters=0; iters < m->iters; iters++){
+        ptr = m->mem;
+		for (size_t i=0; i<(m->size/sizeof(membash_t)); i++){
+            dst = *ptr;
+            ptr++;
+        }
+    }
+	gettimeofday(&m->end_time, NULL);
+	fprintf(stdout, "Read (blockcpy) : ");
+	report_transfer_rate(stdout, &m->start_time,
+			     &m->end_time,
+			     m->iters*m->size);
+	fprintf(stdout, "\n");
+    (void) dst; //suppress set but not used warning
 	return 0;
 }
 
@@ -238,6 +267,15 @@ int main(int argc, char **argv)
     cfg.run(&cfg);
 	cfg.hash = hash_fast;
 	cfg.run(&cfg);
+
+	if ( cfg.blockcpy ){
+        cfg.run  = run_blockcpy;
+        cfg.run(&cfg);
+        cfg.hash = hash_stupid;
+        cfg.run(&cfg);
+        cfg.hash = hash_fast;
+        cfg.run(&cfg);
+    }
 
     cleanup(&cfg);
 	return 0;
