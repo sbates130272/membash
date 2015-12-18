@@ -50,13 +50,13 @@ struct membash {
 	size_t        iters;
 	unsigned      seed;
 	unsigned      blockcpy;
+	unsigned      hash;
 	unsigned      fence;
 	unsigned      verbose;
 
 	char          *mmap;
 	int           mmapfd;
 
-	size_t                  (* hash)(size_t);
 	int                     (* run)(struct membash *);
 
 	struct timeval          start_time;
@@ -70,8 +70,8 @@ static const struct membash defaults = {
 	.blockcpy   = 0,
 	.seed       = 0,
 	.mmap       = NULL,
+	.hash       = 0,
 	.verbose    = 0,
-	.hash       = NULL,
 };
 
 const char program_desc[] =
@@ -91,6 +91,8 @@ static const struct argconfig_commandline_options command_line_options[] = {
 	 "random seed to use for data (set to 0 for auto-gen seed)"},
 	{"mmap",          "MMAP", CFG_STRING, &defaults.mmap, required_argument,
 	 "file to mmap"},
+	{"hash",          "", CFG_NONE, &defaults.hash, no_argument,
+	 "use a fisher-yates hash in blockcpy mode"},
 	{"fence",         "", CFG_NONE, &defaults.fence, no_argument,
 	 "add a mfence between setup and run"},
 	{"v",             "", CFG_NONE, &defaults.verbose, no_argument, NULL},
@@ -98,6 +100,19 @@ static const struct argconfig_commandline_options command_line_options[] = {
 	 "be verbose"},
 	{0}
 };
+
+static size_t fisher_yates(size_t *in, size_t len)
+{
+	for(size_t i=0; i<len; i++)
+		in[i] = i;
+	for (size_t i = len-1; i>0; i--){
+		size_t j = rand() % (i+1);
+		size_t t = in[i];
+		in[i]    = in[j];
+		in[j]    = t;
+	}
+	return len;
+}
 
 static int setup(struct membash *m)
 {
@@ -144,18 +159,19 @@ static int setup(struct membash *m)
 
 static int run_memcpy(struct membash *m)
 {
-	void *dest;
+	void *dst;
 
-	dest = malloc(m->size);
-	if (dest == NULL){
-		fprintf(stderr,"could not allocate for dest!\n");
-		exit(1);
+	dst = malloc(m->size);
+	if ( dst == NULL ){
+		fprintf(stderr,"%s (%d)\n",strerror(errno),
+			errno);
+		exit(errno);
 	}
 
 	gettimeofday(&m->start_time, NULL);
 	for (size_t iters=0; iters < m->iters; iters++)
 	{
-		memcpy(dest, m->mem, m->size);
+		memcpy(dst, m->mem, m->size);
 	}
 	gettimeofday(&m->end_time, NULL);
 	fprintf(stdout, "Read (memcpy)   : ");
@@ -164,7 +180,7 @@ static int run_memcpy(struct membash *m)
 			     m->iters*m->size);
 	fprintf(stdout, "\n");
 
-	free(dest);
+	free(dst);
 	return 0;
 }
 
@@ -178,13 +194,8 @@ static int run_dumb(struct membash *m)
 	for (size_t iters=0; iters < m->iters; iters++)
 	{
 		sum = 0;
-		for (size_t i=0; i<(m->size/sizeof(unsigned)); i++){
-			if ( m->hash )
-				sum += ptr[m->hash(i)];
-			else
-				sum += ptr[i];
-		}
-
+		for (size_t i=0; i<(m->size/sizeof(unsigned)); i++)
+			sum += ptr[i];
 		if ( sum ){
 			fprintf(stderr,"sum did not add to zero (%u)!\n",
 				sum);
@@ -205,13 +216,27 @@ static int run_blockcpy(struct membash *m)
 {
 	typedef struct { char a[m->blockcpy]; } membash_t;
 	membash_t dst, *ptr;
+	size_t *hash = NULL;
+
+	ptr = m->mem;
+
+	if ( m->hash ) {
+		hash = malloc(m->size*sizeof(size_t)/sizeof(membash_t));
+		if (hash == NULL){
+			fprintf(stderr,"%s (%d)\n",strerror(errno),
+				errno);
+			exit(errno);
+		}
+		fisher_yates(hash, m->size/sizeof(membash_t));
+	}
 
 	gettimeofday(&m->start_time, NULL);
 	for (size_t iters=0; iters < m->iters; iters++){
-		ptr = m->mem;
-		for (size_t i=0; i<(m->size/sizeof(membash_t)); i++){
-			dst = *ptr;
-			ptr++;
+		for (size_t i=0; i<(m->size/sizeof(membash_t)); i++) {
+			if ( m->hash )
+				dst = ptr[hash[i]];
+			else
+				dst = ptr[i];
 		}
 	}
 	gettimeofday(&m->end_time, NULL);
@@ -221,6 +246,8 @@ static int run_blockcpy(struct membash *m)
 			     m->iters*m->size);
 	fprintf(stdout, "\n");
 	(void) dst; //suppress set but not used warning
+	if (m->hash)
+		free(hash);
 	return 0;
 }
 
@@ -234,16 +261,6 @@ static void cleanup(struct membash *m)
 		free(m->mem);
 }
 
-static inline size_t hash_stupid(size_t i)
-{
-	return i;
-}
-
-static inline size_t hash_fast(size_t i)
-{
-	return i;
-}
-
 int main(int argc, char **argv)
 {
 	struct membash cfg;
@@ -253,6 +270,11 @@ int main(int argc, char **argv)
 	if (args != 0) {
 		argconfig_print_help(argv[0], program_desc, command_line_options);
 		return 1;
+	}
+
+	if (cfg.hash && !cfg.blockcpy){
+		fprintf(stderr, "Can only use --hash when --blockcpy is set.\n");
+		exit(-1);
 	}
 
 	if (cfg.seed==0)
@@ -267,24 +289,12 @@ int main(int argc, char **argv)
 #endif
 	cfg.run  = run_dumb;
 	cfg.run(&cfg);
-	cfg.hash = hash_stupid;
-	cfg.run(&cfg);
-	cfg.hash = hash_fast;
-	cfg.run(&cfg);
 
 	cfg.run  = run_memcpy;
-	cfg.run(&cfg);
-	cfg.hash = hash_stupid;
-	cfg.run(&cfg);
-	cfg.hash = hash_fast;
 	cfg.run(&cfg);
 
 	if ( cfg.blockcpy ){
 		cfg.run  = run_blockcpy;
-		cfg.run(&cfg);
-		cfg.hash = hash_stupid;
-		cfg.run(&cfg);
-		cfg.hash = hash_fast;
 		cfg.run(&cfg);
 	}
 
